@@ -1,5 +1,6 @@
 const CustomError = require("../Controller/customError");
 const mongoose = require("mongoose");
+const Message = require("../models/messageSchema"); // Assuming you have a MessageSchema defined in models
 
 class MessageController {
     static async createMessage(req, res, next) {

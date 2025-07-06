@@ -1,7 +1,7 @@
 const User = require("../models/UserSchema");
 const CentralBalance = require("../models/CentralBalanceSchema");
 const Transaction = require("../models/TransactionSchema");
-const Message = require("../models/messageSchema");
+const Message = require("../models/MessageSchema");
 const CustomError = require("./customError"); // Assuming customError.js is in the same directory
 const mongoose = require("mongoose");
 
