@@ -1,4 +1,3 @@
-const Message = require("../models/messageSchema");
 const CustomError = require("../Controller/customError");
 const mongoose = require("mongoose");
 
