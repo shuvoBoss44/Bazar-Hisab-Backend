@@ -252,14 +252,11 @@ class UserController {
 
         try {
             const { id: targetUserId } = req.params;
-            const { amount, reason = "Manual Balance Adjustment" } = req.body;
+            const { amount } = req.body;
             const requestingUser = req.user;
 
             if (!mongoose.isValidObjectId(targetUserId)) {
                 throw new CustomError("Invalid target user ID provided.", 400);
-            }
-            if (isNaN(Number(amount)) || Number(amount) === 0) {
-                throw new CustomError("Amount must be a non-zero number.", 400);
             }
 
             const targetUser = await User.findById(targetUserId).session(session);
@@ -352,10 +349,6 @@ class UserController {
             if (!mongoose.isValidObjectId(targetUserId)) {
                 throw new CustomError("Invalid target user ID provided.", 400);
             }
-            if (isNaN(Number(amount)) || Number(amount) <= 0) {
-                throw new CustomError("Amount must be a positive number.", 400);
-            }
-
             const targetUser = await User.findById(targetUserId).session(session);
             if (!targetUser) {
                 throw new CustomError("Target user not found.", 404);
