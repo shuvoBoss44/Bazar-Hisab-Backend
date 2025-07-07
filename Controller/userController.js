@@ -166,7 +166,7 @@ class UserController {
 
         try {
             const { id: targetUserId } = req.params;
-            const { amount, reason = "Balance Adjustment" } = req.body;
+            const { amount, reason = "Manual Balance Adjustment" } = req.body;
             const requestingUser = req.user;
 
             if (!mongoose.isValidObjectId(targetUserId)) {
@@ -181,15 +181,7 @@ class UserController {
                 throw new CustomError("Target user not found.", 404);
             }
 
-            // Check for sufficient balance only if amount is negative
-            if (Number(amount) < 0 && targetUser.balance < Math.abs(Number(amount))) {
-                throw new CustomError(
-                    `Insufficient balance for user ${targetUser.name} to remove ${Math.abs(Number(amount)).toFixed(2)} tk. Current balance: ${targetUser.balance.toFixed(2)} tk.`,
-                    400
-                );
-            }
-
-            const balanceBeforeAdjustment = targetUser.balance;
+            const balanceBeforeAdjustment = targetUser.balance; // Store this value
 
             const updatedUser = await User.findByIdAndUpdate(
                 targetUserId,
@@ -208,12 +200,14 @@ class UserController {
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
+            // --- MOVED LOGIC FOR usersBalancesAtTransactionTime BEFORE Transaction.create ---
             const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
             const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
                 _id: userDoc._id,
                 name: userDoc.name,
                 balanceAtTime: userDoc.balance
             }));
+            // --- END MOVED LOGIC ---
 
             const transactionType = Number(amount) > 0 ? "Balance Addition" : "Balance Removal";
             const [transaction] = await Transaction.create(
@@ -225,7 +219,7 @@ class UserController {
                     centralBalanceAfter: centralBalanceDoc.balance,
                     individualDeduction: Number(amount),
                     userBalanceBeforeTransaction: balanceBeforeAdjustment,
-                    usersBalancesAtTransactionTime,
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // This is now defined
                 }],
                 { session }
             );
@@ -245,8 +239,7 @@ class UserController {
                         id: updatedUser._id,
                         name: updatedUser.name,
                         email: updatedUser.email,
-                        balance: updatedUser.balance,
-                        role: updatedUser.role
+                        balance: updatedUser.balance
                     },
                     centralBalance: centralBalanceDoc.balance,
                     transaction: finalTransaction
@@ -254,8 +247,102 @@ class UserController {
             });
         } catch (err) {
             await session.abortTransaction();
-            console.error("Error during balance adjustment:", err);
-            next(err.statusCode ? err : new CustomError(err.message || "Failed to adjust balance due to an unexpected error.", 500));
+            console.error("Error during user balance adjustment:", err);
+            next(err.statusCode ? err : new CustomError(err.message || "Failed to adjust user balance due to an unexpected error.", 500));
+        } finally {
+            session.endSession();
+        }
+    }
+
+    static async removeBalance(req, res, next) {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            const { id: targetUserId } = req.params;
+            const { amount } = req.body;
+            const requestingUser = req.user;
+
+            if (!mongoose.isValidObjectId(targetUserId)) {
+                throw new CustomError("Invalid target user ID provided.", 400);
+            }
+            if (isNaN(Number(amount)) || Number(amount) <= 0) {
+                throw new CustomError("Amount must be a positive number.", 400);
+            }
+
+            const targetUser = await User.findById(targetUserId).session(session);
+            if (!targetUser) {
+                throw new CustomError("Target user not found.", 404);
+            }
+
+            if (targetUser.balance < Number(amount)) {
+                throw new CustomError(`Insufficient balance for user ${targetUser.name} to remove ${Number(amount).toFixed(2)} tk. Current balance: ${targetUser.balance.toFixed(2)} tk.`, 400);
+            }
+
+            const balanceBeforeRemoval = targetUser.balance; // Store this value
+
+            let centralBalanceDoc = await CentralBalance.findOne().session(session);
+            if (!centralBalanceDoc) {
+                throw new CustomError("Central balance document not found. Please contact support.", 500);
+            }
+
+            const updatedUser = await User.findByIdAndUpdate(
+                targetUserId,
+                { $inc: { balance: -Number(amount) } },
+                { new: true, session }
+            );
+
+            centralBalanceDoc.balance -= Number(amount);
+            centralBalanceDoc.lastUpdated = Date.now();
+            await centralBalanceDoc.save({ session });
+
+            // --- MOVED LOGIC FOR usersBalancesAtTransactionTime BEFORE Transaction.create ---
+            const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
+            const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
+                _id: userDoc._id,
+                name: userDoc.name,
+                balanceAtTime: userDoc.balance
+            }));
+            // --- END MOVED LOGIC ---
+
+            const [transaction] = await Transaction.create(
+                [{
+                    items: [{ itemName: "Balance Removal", price: Number(amount) }],
+                    createdBy: requestingUser._id,
+                    sharedUsers: [targetUserId],
+                    totalPrice: -Number(amount), // Store as negative for removal in totalPrice
+                    centralBalanceAfter: centralBalanceDoc.balance,
+                    individualDeduction: -Number(amount), // Store as negative
+                    userBalanceBeforeTransaction: balanceBeforeRemoval,
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // This is now defined
+                }],
+                { session }
+            );
+
+            await session.commitTransaction();
+
+            const finalTransaction = await Transaction.findById(transaction._id)
+                .populate("createdBy sharedUsers")
+                .session(null);
+
+            res.status(200).json({
+                status: "success",
+                message: `${Number(amount).toFixed(2)} tk successfully removed from ${updatedUser.name}'s balance.`,
+                data: {
+                    user: {
+                        id: updatedUser._id,
+                        name: updatedUser.name,
+                        email: updatedUser.email,
+                        balance: updatedUser.balance
+                    },
+                    centralBalance: centralBalanceDoc.balance,
+                    transaction: finalTransaction
+                }
+            });
+        } catch (err) {
+            await session.abortTransaction();
+            console.error("Error during balance removal:", err);
+            next(err.statusCode ? err : new CustomError(err.message || "Failed to remove balance due to an unexpected error.", 500));
         } finally {
             session.endSession();
         }
