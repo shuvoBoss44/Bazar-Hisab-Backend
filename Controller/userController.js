@@ -196,14 +196,14 @@ class UserController {
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
-            // --- START NEW LOGIC FOR usersBalancesAtTransactionTime ---
+            // --- MOVED LOGIC FOR usersBalancesAtTransactionTime BEFORE Transaction.create ---
             const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
             const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
                 _id: userDoc._id,
                 name: userDoc.name,
                 balanceAtTime: userDoc.balance
             }));
-            // --- END NEW LOGIC ---
+            // --- END MOVED LOGIC ---
 
             const [transaction] = await Transaction.create(
                 [{
@@ -214,7 +214,7 @@ class UserController {
                     centralBalanceAfter: centralBalanceDoc.balance,
                     individualDeduction: Number(amount),
                     userBalanceBeforeTransaction: balanceBeforeAddition,
-                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // ADDED THIS LINE
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // This is now defined
                 }],
                 { session }
             );
@@ -286,6 +286,15 @@ class UserController {
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
+            // --- MOVED LOGIC FOR usersBalancesAtTransactionTime BEFORE Transaction.create ---
+            const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
+            const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
+                _id: userDoc._id,
+                name: userDoc.name,
+                balanceAtTime: userDoc.balance
+            }));
+            // --- END MOVED LOGIC ---
+
             const transactionType = Number(amount) > 0 ? "Balance Addition" : "Balance Removal";
             const [transaction] = await Transaction.create(
                 [{
@@ -296,19 +305,10 @@ class UserController {
                     centralBalanceAfter: centralBalanceDoc.balance,
                     individualDeduction: Number(amount),
                     userBalanceBeforeTransaction: balanceBeforeAdjustment,
-                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // ADDED THIS LINE
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // This is now defined
                 }],
                 { session }
             );
-
-            // --- START NEW LOGIC FOR usersBalancesAtTransactionTime ---
-            const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
-            const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
-                _id: userDoc._id,
-                name: userDoc.name,
-                balanceAtTime: userDoc.balance
-            }));
-            // --- END NEW LOGIC ---
 
             await session.commitTransaction();
 
@@ -382,14 +382,14 @@ class UserController {
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
-            // --- START NEW LOGIC FOR usersBalancesAtTransactionTime ---
+            // --- MOVED LOGIC FOR usersBalancesAtTransactionTime BEFORE Transaction.create ---
             const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
             const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
                 _id: userDoc._id,
                 name: userDoc.name,
                 balanceAtTime: userDoc.balance
             }));
-            // --- END NEW LOGIC ---
+            // --- END MOVED LOGIC ---
 
             const [transaction] = await Transaction.create(
                 [{
@@ -400,7 +400,7 @@ class UserController {
                     centralBalanceAfter: centralBalanceDoc.balance,
                     individualDeduction: -Number(amount), // Store as negative
                     userBalanceBeforeTransaction: balanceBeforeRemoval,
-                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // ADDED THIS LINE
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // This is now defined
                 }],
                 { session }
             );
