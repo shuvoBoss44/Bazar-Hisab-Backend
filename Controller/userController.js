@@ -28,7 +28,7 @@ class UserController {
                 email: normalizedEmail,
                 password,
                 balance: 0,
-                role: 'user', // Added default role
+                // Consider adding a default 'role' field here, e.g., role: 'user'
             });
 
             res.status(201).json({
@@ -38,8 +38,7 @@ class UserController {
                         id: user._id,
                         name: user.name,
                         email: user.email,
-                        balance: user.balance,
-                        role: user.role
+                        balance: user.balance
                     }
                 }
             });
@@ -157,6 +156,93 @@ class UserController {
             });
         } catch (err) {
             next(err.statusCode ? err : new CustomError(err.message || "Failed to fetch user data", 500));
+        }
+    }
+
+    static async addBalance(req, res, next) {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            const { amount } = req.body;
+            const user = req.user; // Authenticated user
+
+            if (isNaN(Number(amount)) || Number(amount) <= 0) {
+                throw new CustomError("Amount must be a positive number", 400);
+            }
+
+            // Fetch the user's current balance BEFORE updating it
+            const currentUser = await User.findById(user._id).session(session);
+            if (!currentUser) {
+                throw new CustomError("Authenticated user not found.", 404);
+            }
+            const balanceBeforeAddition = currentUser.balance; // Store this value
+
+            let centralBalanceDoc = await CentralBalance.findOne().session(session);
+            if (!centralBalanceDoc) {
+                centralBalanceDoc = await CentralBalance.create(
+                    [{ balance: 0, lastUpdated: Date.now() }],
+                    { session }
+                )[0];
+            }
+
+            const updatedUser = await User.findByIdAndUpdate(
+                user._id,
+                { $inc: { balance: Number(amount) } },
+                { new: true, session }
+            );
+
+            centralBalanceDoc.balance += Number(amount);
+            centralBalanceDoc.lastUpdated = Date.now();
+            await centralBalanceDoc.save({ session });
+
+            // --- MOVED LOGIC FOR usersBalancesAtTransactionTime BEFORE Transaction.create ---
+            const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
+            const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
+                _id: userDoc._id,
+                name: userDoc.name,
+                balanceAtTime: userDoc.balance
+            }));
+            // --- END MOVED LOGIC ---
+
+            const [transaction] = await Transaction.create(
+                [{
+                    items: [{ itemName: "Balance Addition", price: Number(amount) }],
+                    createdBy: user._id,
+                    sharedUsers: [user._id],
+                    totalPrice: Number(amount),
+                    centralBalanceAfter: centralBalanceDoc.balance,
+                    individualDeduction: Number(amount),
+                    userBalanceBeforeTransaction: balanceBeforeAddition,
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // This is now defined
+                }],
+                { session }
+            );
+
+            await session.commitTransaction();
+
+            const finalTransaction = await Transaction.findById(transaction._id)
+                .populate("createdBy sharedUsers")
+                .session(null);
+
+            res.status(200).json({
+                status: "success",
+                data: {
+                    user: {
+                        id: updatedUser._id,
+                        name: updatedUser.name,
+                        email: updatedUser.email,
+                        balance: updatedUser.balance
+                    },
+                    centralBalance: centralBalanceDoc.balance,
+                    transaction: finalTransaction
+                }
+            });
+        } catch (err) {
+            await session.abortTransaction();
+            next(err.statusCode ? err : new CustomError(err.message || "Failed to add balance", 500));
+        } finally {
+            session.endSession();
         }
     }
 
@@ -414,14 +500,18 @@ class UserController {
 
     static async login(req, res, next) {
         try {
-            const { email, password } = req.body;
-            const user = await User.findOne({ email: email.toLowerCase().trim() }).select("+password");
-
-            if (!user) {
-                throw new CustomError("Invalid email or password", 401);
+            if (!process.env.JWT_SECRET) {
+                throw new CustomError("Server configuration error: JWT_SECRET not defined.", 500);
             }
-            const isMatch = await bcrypt.compare(password, user.password);
-            if (!isMatch) {
+
+            const { email, password } = req.body;
+            if (!email?.trim() || !password) {
+                throw new CustomError("Email and password are required", 400);
+            }
+
+            const normalizedEmail = email.toLowerCase().trim();
+            const user = await User.findOne({ email: normalizedEmail }).select("+password");
+            if (!user || !(await bcrypt.compare(password, user.password))) {
                 throw new CustomError("Invalid email or password", 401);
             }
 
@@ -431,9 +521,9 @@ class UserController {
 
             res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: "none",
-                maxAge: 15 * 24 * 60 * 60 * 1000,
+                secure: process.env.NODE_ENV === "production", // true on Render, false locally if not HTTPS
+                sameSite: "none", // Required for cross-origin with credentials
+                maxAge: 15 * 24 * 60 * 60 * 1000, // 15 days
             });
 
             res.status(200).json({
@@ -459,7 +549,7 @@ class UserController {
             res.clearCookie("token", {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
-                sameSite: "none",
+                sameSite: "Lax"
             });
             res.status(200).json({
                 status: "success",
