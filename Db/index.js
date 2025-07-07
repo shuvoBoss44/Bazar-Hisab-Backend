@@ -2,11 +2,22 @@ const mongoose = require("mongoose");
 
 const ConnectDB = async function () {
     try {
-        await mongoose.connect(process.env.DB)
-        console.log("Database Connected")
+        await mongoose.connect(process.env.DB, {
+            serverSelectionTimeoutMS: 30000, // Keep custom timeout
+            bufferCommands: false, // Keep to avoid buffering timeouts
+        });
+        console.log("Database Connected");
     } catch (error) {
-        console.log(error)
+        console.error("MongoDB connection error:", error.message);
     }
-}
+
+    mongoose.connection.on("error", (err) => {
+        console.error("MongoDB connection error:", err);
+    });
+
+    mongoose.connection.on("disconnected", () => {
+        console.log("MongoDB disconnected, attempting to reconnect...");
+    });
+};
 
 module.exports = ConnectDB;
