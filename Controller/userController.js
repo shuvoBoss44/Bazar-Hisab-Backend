@@ -501,25 +501,15 @@ class UserController {
     static async login(req, res, next) {
         try {
             const { email, password } = req.body;
-            const normalizedEmail = email.toLowerCase().trim();
-            const user = await User.findOne({ email: normalizedEmail }).select("+password");
+            const user = await User.findOne({ email: email }).select("+password");
 
             if (!user) {
                 throw new CustomError("Invalid email or password", 401);
             }
-
-            // Check if password is hashed
-            if (!user.password.startsWith('$2a$')) {
-                // Password is not hashed, compare directly (temporary fix)
-                if (password !== user.password) {
-                    throw new CustomError("Invalid email or password", 401);
-                }
-            } else {
-                // Password is hashed, use bcrypt
-                const isMatch = await bcrypt.compare(password, user.password);
-                if (!isMatch) {
-                    throw new CustomError("Invalid email or password", 401);
-                }
+            // Password is hashed, use bcrypt
+            const isMatch = await bcrypt.compare(password, user.password);
+            if (!isMatch) {
+                throw new CustomError("Invalid email or password", 401);
             }
 
             const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
