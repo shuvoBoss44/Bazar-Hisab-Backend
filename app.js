@@ -14,7 +14,7 @@ database();
 // Middleware
 app.use(cookieParser());
 app.use(cors({
-    origin: process.env.CLIENT_URL || "https://bazar-hisab-bsm.vercel.app/",
+    origin: process.env.CLIENT_URL || "https://bazar-hisab-bsm.vercel.app",
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization']
