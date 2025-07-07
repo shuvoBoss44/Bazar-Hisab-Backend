@@ -550,16 +550,16 @@ class UserController {
                             name: req.user.name,
                             email: req.user.email,
                             balance: req.user.balance,
-                            role: req.user.role
-                        }
-                    }
+                            role: req.user.role,
+                        },
+                    },
                 });
             }
 
             if (!req.cookies?.token || !process.env.JWT_SECRET) {
                 return res.status(200).json({
                     status: "success",
-                    data: { isAuthenticated: false, user: null }
+                    data: { isAuthenticated: false, user: null },
                 });
             }
 
@@ -570,19 +570,21 @@ class UserController {
                 status: "success",
                 data: {
                     isAuthenticated: !!user,
-                    user: user ? {
-                        id: user._id,
-                        name: user.name,
-                        email: user.email,
-                        balance: user.balance,
-                        role: user.role
-                    } : null
-                }
+                    user: user
+                        ? {
+                            id: user._id,
+                            name: user.name,
+                            email: user.email,
+                            balance: user.balance,
+                            role: user.role,
+                        }
+                        : null,
+                },
             });
         } catch (err) {
             res.status(200).json({
                 status: "success",
-                data: { isAuthenticated: false, user: null }
+                data: { isAuthenticated: false, user: null },
             });
         }
     }
