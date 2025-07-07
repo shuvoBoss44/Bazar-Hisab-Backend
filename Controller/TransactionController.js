@@ -1,9 +1,9 @@
+const mongoose = require("mongoose");
+const Transaction = require("../models/TransactionSchema");
 const User = require("../models/UserSchema");
 const CentralBalance = require("../models/CentralBalanceSchema");
-const Transaction = require("../models/TransactionSchema");
 const Message = require("../models/MessageSchema");
 const CustomError = require("./customError");
-const mongoose = require("mongoose");
 
 class TransactionController {
   static async createTransaction(req, res, next) {
@@ -45,7 +45,6 @@ class TransactionController {
         createdByString
       ])];
 
-      // Fetch users involved to get their initial balances (if needed for userBalanceBeforeTransaction)
       const involvedUsersBeforeUpdate = await User.find({ _id: { $in: allInvolvedUserStrings } }).session(session);
       if (!involvedUsersBeforeUpdate || involvedUsersBeforeUpdate.length !== allInvolvedUserStrings.length) {
         throw new CustomError("One or more invalid user IDs involved in transaction", 400);
@@ -57,7 +56,6 @@ class TransactionController {
         centralBalanceDoc = centralBalanceDoc[0];
       }
 
-      // Adjust central balance
       if (isBalanceAddition) {
         centralBalanceDoc.balance += total;
       } else {
@@ -66,17 +64,16 @@ class TransactionController {
       centralBalanceDoc.lastUpdated = Date.now();
       await centralBalanceDoc.save({ session });
 
-      // Adjust user balances
       let creatorUserBeforeUpdate = involvedUsersBeforeUpdate.find(u => u._id.toString() === createdByString);
-      let userBalanceBeforeTransactionForCreator = creatorUserBeforeUpdate ? creatorUserBeforeUpdate.balance : 0; // Snapshot before update
+      let userBalanceBeforeTransactionForCreator = creatorUserBeforeUpdate ? creatorUserBeforeUpdate.balance : 0;
 
       if (isBalanceAddition) {
-        const creatorUser = await User.findById(createdBy).session(session); // Re-fetch to get current value
+        const creatorUser = await User.findById(createdBy).session(session);
         if (!creatorUser) throw new CustomError("Creator user not found during balance update.", 404);
         creatorUser.balance += total;
         await creatorUser.save({ session });
       } else if (isBalanceRemoval) {
-        const creatorUser = await User.findById(createdBy).session(session); // Re-fetch to get current value
+        const creatorUser = await User.findById(createdBy).session(session);
         if (!creatorUser) throw new CustomError("Creator user not found during balance update.", 404);
         if (creatorUser.balance < total) {
           throw new CustomError(`Insufficient balance for ${creatorUser.name} to remove ${total.toFixed(2)} tk. Current balance: ${creatorUser.balance.toFixed(2)} tk.`, 400);
@@ -87,14 +84,12 @@ class TransactionController {
         await User.updateMany({ _id: { $in: finalSharedUsers } }, { $inc: { balance: -individualDeduction } }, { session });
       }
 
-      // --- NEW LOGIC: Capture all users' balances AFTER the transaction impact ---
-      const allUsersAfterTransaction = await User.find({}, 'name balance').session(session); // Fetch all users with name and balance
+      const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
       const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
         _id: userDoc._id,
         name: userDoc.name,
-        balanceAtTime: userDoc.balance // This is the balance *after* the transaction
+        balanceAtTime: userDoc.balance
       }));
-      // --- END NEW LOGIC ---
 
       const [transaction] = await Transaction.create([{
         items,
@@ -103,8 +98,8 @@ class TransactionController {
         totalPrice: total,
         centralBalanceAfter: centralBalanceDoc.balance,
         individualDeduction: individualDeduction,
-        userBalanceBeforeTransaction: userBalanceBeforeTransactionForCreator, // Store the snapshot of creator's balance
-        usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // Store the snapshot of ALL users' balances
+        userBalanceBeforeTransaction: userBalanceBeforeTransactionForCreator,
+        usersBalancesAtTransactionTime: usersBalancesAtTransactionTime
       }], { session });
 
       const purchaser = await User.findById(createdBy).session(session);
@@ -125,7 +120,6 @@ class TransactionController {
 
       await session.commitTransaction();
 
-      // For response, populate populated fields for the newly created transaction
       const createdTransaction = await Transaction.findById(transaction._id).populate("createdBy sharedUsers").session(null);
       res.status(201).json({
         status: "success",
@@ -147,7 +141,6 @@ class TransactionController {
       const skip = (page - 1) * limit;
 
       const totalTransactions = await Transaction.countDocuments();
-      // Ensure the new field is returned
       const transactions = await Transaction.find()
         .populate("createdBy sharedUsers")
         .sort({ createdAt: -1 })
@@ -173,7 +166,6 @@ class TransactionController {
     try {
       const { id } = req.params;
       if (!mongoose.isValidObjectId(id)) throw new CustomError("Invalid transaction ID", 400);
-      // Ensure the new field is returned
       const transaction = await Transaction.findById(id).populate("createdBy sharedUsers");
       if (!transaction) throw new CustomError("Transaction not found", 404);
 
@@ -191,7 +183,7 @@ class TransactionController {
     session.startTransaction();
     try {
       const { id: transactionId } = req.params;
-      const { items, sharedUsers } = req.body;
+      const { items, sharedUsers, totalPrice, originalTotalPrice, userBalanceBeforeTransaction, usersBalancesAtTransactionTime } = req.body;
       const requestingUserId = req.user._id;
 
       if (!mongoose.isValidObjectId(transactionId)) throw new CustomError("Invalid transaction ID", 400);
@@ -201,44 +193,28 @@ class TransactionController {
       const originalTransaction = await Transaction.findById(transactionId).session(session);
       if (!originalTransaction) throw new CustomError("Transaction not found", 404);
 
-      if (originalTransaction.createdBy._id.toString() !== requestingUserId.toString()) {
+      if (originalTransaction.createdBy.toString() !== requestingUserId.toString()) {
         throw new CustomError("Unauthorized to update this transaction", 403);
       }
 
-      // 1. Revert Old Transaction's Impact
-      const wasOriginalBalanceAddition = originalTransaction.items[0]?.itemName === "Balance Addition";
-      const wasOriginalBalanceRemoval = originalTransaction.items[0]?.itemName === "Balance Removal";
-      // const wasOriginalBalanceTransaction = wasOriginalBalanceAddition || wasOriginalBalanceRemoval; // Not strictly needed here but useful for clarity
-
-      const oldTotal = originalTransaction.totalPrice;
-      const oldIndividualDeduction = originalTransaction.individualDeduction;
-
-      let centralBalanceDoc = await CentralBalance.findOne().session(session);
-      if (!centralBalanceDoc) throw new CustomError("Central balance document not found. Please contact support.", 500);
-
-      if (wasOriginalBalanceAddition) {
-        centralBalanceDoc.balance -= oldTotal;
-        await User.findByIdAndUpdate(originalTransaction.createdBy, { $inc: { balance: -oldTotal } }, { session });
-      } else if (wasOriginalBalanceRemoval) {
-        centralBalanceDoc.balance += oldTotal;
-        await User.findByIdAndUpdate(originalTransaction.createdBy, { $inc: { balance: oldTotal } }, { session });
-      } else {
-        centralBalanceDoc.balance += oldTotal;
-        await User.updateMany({ _id: { $in: originalTransaction.sharedUsers } }, { $inc: { balance: oldIndividualDeduction } }, { session });
+      // Check if this is the most recent transaction
+      const latestTransaction = await Transaction.findOne().sort({ createdAt: -1 }).session(session);
+      if (latestTransaction && latestTransaction._id.toString() !== transactionId) {
+        throw new CustomError("Only the most recent transaction can be edited", 403);
       }
 
-      // 2. Determine New Transaction Type and Calculate New Values
+      // Validate transaction type consistency
+      const wasOriginalBalanceAddition = originalTransaction.items[0]?.itemName === "Balance Addition";
+      const wasOriginalBalanceRemoval = originalTransaction.items[0]?.itemName === "Balance Removal";
       const isNewBalanceAddition = items[0].itemName === "Balance Addition";
       const isNewBalanceRemoval = items[0].itemName === "Balance Removal";
       const isNewBalanceTransaction = isNewBalanceAddition || isNewBalanceRemoval;
 
       if ((wasOriginalBalanceAddition !== isNewBalanceAddition) || (wasOriginalBalanceRemoval !== isNewBalanceRemoval)) {
-        throw new CustomError("Cannot change transaction type (e.g., Shopping to Balance or Balance Addition to Removal) during edit. Please delete and create a new transaction.", 400);
+        throw new CustomError("Cannot change transaction type during edit. Please delete and create a new transaction.", 400);
       }
 
-
-      const newTotal = items.reduce((sum, item) => sum + Number(item.price), 0);
-
+      // Validate shared users
       let finalNewSharedUsers;
       let newIndividualDeduction;
 
@@ -247,80 +223,88 @@ class TransactionController {
           throw new CustomError("Balance transactions can only involve the creator as the shared user.", 400);
         }
         finalNewSharedUsers = [requestingUserId];
-        newIndividualDeduction = newTotal;
-        if (isNewBalanceRemoval) newIndividualDeduction = -newTotal;
+        newIndividualDeduction = totalPrice;
       } else {
         if (!sharedUsers?.length || !Array.isArray(sharedUsers)) throw new CustomError("At least one user must be selected for shopping transactions", 400);
-        finalNewSharedUsers = [...new Set(sharedUsers.map(id => new mongoose.Types.ObjectId(id)))]; // Convert to ObjectId here
-        newIndividualDeduction = newTotal / finalNewSharedUsers.length;
+        finalNewSharedUsers = [...new Set(sharedUsers.map(id => new mongoose.Types.ObjectId(id)))];
+        newIndividualDeduction = totalPrice / finalNewSharedUsers.length;
       }
 
-      const allNewInvolvedUserIds = [...new Set([...finalNewSharedUsers.map(id => id.toString()), requestingUserId.toString()])];
+      const allNewInvolvedUserIds = [...new Set(finalNewSharedUsers.map(id => id.toString()).concat(requestingUserId.toString()))];
       const newUsers = await User.find({ _id: { $in: allNewInvolvedUserIds } }).session(session);
-      if (!newUsers || newUsers.length !== allNewInvolvedUserIds.length) throw new CustomError("One or more new invalid user IDs involved in transaction", 400);
+      if (!newUsers || newUsers.length !== allNewInvolvedUserIds.length) throw new CustomError("One or more invalid user IDs involved in transaction", 400);
 
-      // 3. Apply New Transaction's Impact
-      let userBalanceBeforeTransactionForCreator = 0; // Initialize for update context
+      // Revert original transaction effects using historical balance data
+      let centralBalanceDoc = await CentralBalance.findOne().session(session);
+      if (!centralBalanceDoc) throw new CustomError("Central balance document not found.", 500);
 
+      const oldTotal = originalTotalPrice || originalTransaction.totalPrice;
+      const oldIndividualDeduction = originalTransaction.individualDeduction;
+
+      if (wasOriginalBalanceAddition) {
+        centralBalanceDoc.balance -= oldTotal;
+        await User.findByIdAndUpdate(originalTransaction.createdBy, { $inc: { balance: -oldTotal } }, { session });
+      } else if (wasOriginalBalanceRemoval) {
+        centralBalanceDoc.balance += Math.abs(oldTotal);
+        await User.findByIdAndUpdate(originalTransaction.createdBy, { $inc: { balance: Math.abs(oldTotal) } }, { session });
+      } else {
+        const balanceMap = new Map(usersBalancesAtTransactionTime.map(u => [u._id.toString(), u.balanceAtTime]));
+        for (const userId of originalTransaction.sharedUsers) {
+          const userIdStr = userId.toString();
+          const balanceAfter = balanceMap.get(userIdStr) || 0;
+          const balanceBefore = balanceAfter + oldIndividualDeduction;
+          await User.findByIdAndUpdate(userId, { balance: balanceBefore }, { session });
+        }
+        centralBalanceDoc.balance += oldTotal;
+      }
+
+      // Apply new transaction effects
       if (isNewBalanceAddition) {
-        const creatorUser = await User.findById(requestingUserId).session(session);
-        userBalanceBeforeTransactionForCreator = creatorUser ? creatorUser.balance : 0;
-        if (!creatorUser) throw new CustomError("Creator user not found during balance update.", 404);
-        creatorUser.balance += newTotal;
-        await creatorUser.save({ session });
-        centralBalanceDoc.balance += newTotal;
+        await User.findByIdAndUpdate(requestingUserId, { $inc: { balance: totalPrice } }, { session });
+        centralBalanceDoc.balance += totalPrice;
       } else if (isNewBalanceRemoval) {
         const creatorUser = await User.findById(requestingUserId).session(session);
-        userBalanceBeforeTransactionForCreator = creatorUser ? creatorUser.balance : 0;
-        if (!creatorUser || creatorUser.balance < newTotal) {
-          throw new CustomError(`Insufficient balance for ${creatorUser?.name || 'user'} to remove ${newTotal.toFixed(2)} tk.`, 400);
+        if (!creatorUser || creatorUser.balance < Math.abs(totalPrice)) {
+          throw new CustomError(`Insufficient balance for ${creatorUser?.name || 'user'} to remove ${Math.abs(totalPrice).toFixed(2)} tk.`, 400);
         }
-        creatorUser.balance -= newTotal;
-        await creatorUser.save({ session });
-        centralBalanceDoc.balance -= newTotal;
+        await User.findByIdAndUpdate(requestingUserId, { $inc: { balance: -totalPrice } }, { session });
+        centralBalanceDoc.balance -= Math.abs(totalPrice);
       } else {
-        // For shopping transactions
-        // Get user balances *before* this specific update to store in the transaction document
-        // This is a bit tricky for multiple users. We'll store the *creator's* before balance.
-        // For sharedUsers, the "before" balance is (current + deduction)
-        const creatorUser = await User.findById(requestingUserId).session(session);
-        userBalanceBeforeTransactionForCreator = creatorUser ? creatorUser.balance : 0;
-
-        centralBalanceDoc.balance -= newTotal;
         await User.updateMany({ _id: { $in: finalNewSharedUsers } }, { $inc: { balance: -newIndividualDeduction } }, { session });
+        centralBalanceDoc.balance -= totalPrice;
       }
+
       centralBalanceDoc.lastUpdated = Date.now();
       await centralBalanceDoc.save({ session });
 
-      // --- NEW LOGIC: Capture all users' balances AFTER the transaction impact for update ---
-      const allUsersAfterTransaction = await User.find({}, 'name balance').session(session); // Fetch all users with name and balance
-      const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
+      // Update usersBalancesAtTransactionTime
+      const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
+      const updatedUsersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
         _id: userDoc._id,
         name: userDoc.name,
         balanceAtTime: userDoc.balance
       }));
-      // --- END NEW LOGIC ---
 
-      // 4. Update the Transaction Document
+      // Update transaction document
       originalTransaction.items = items;
       originalTransaction.sharedUsers = finalNewSharedUsers;
-      originalTransaction.totalPrice = newTotal;
+      originalTransaction.totalPrice = totalPrice;
       originalTransaction.centralBalanceAfter = centralBalanceDoc.balance;
       originalTransaction.individualDeduction = newIndividualDeduction;
       originalTransaction.edited = true;
-      originalTransaction.userBalanceBeforeTransaction = userBalanceBeforeTransactionForCreator; // Update creator's before balance
-      originalTransaction.usersBalancesAtTransactionTime = usersBalancesAtTransactionTime; // Update the snapshot of ALL users' balances
-
+      originalTransaction.userBalanceBeforeTransaction = userBalanceBeforeTransaction || originalTransaction.userBalanceBeforeTransaction;
+      originalTransaction.usersBalancesAtTransactionTime = updatedUsersBalancesAtTransactionTime;
+      originalTransaction.updatedAt = Date.now();
       await originalTransaction.save({ session });
 
-      // 5. Update Associated Message
+      // Update associated message
       const purchaser = await User.findById(requestingUserId).session(session);
       await Message.findOneAndUpdate(
         { transactionId: transactionId },
         {
           message: `${purchaser.name} ${isNewBalanceAddition ? "added" : (isNewBalanceRemoval ? "removed" : "bought")} [${items.map(i => `${i.itemName}: $${i.price.toFixed(2)}`).join(", ")}]`,
           items,
-          totalPrice: newTotal,
+          totalPrice,
           purchaser: requestingUserId,
           sharedUsers: finalNewSharedUsers,
           centralBalanceAfter: centralBalanceDoc.balance,
@@ -363,6 +347,12 @@ class TransactionController {
       const transaction = await Transaction.findById(id).session(session);
       if (!transaction) throw new CustomError("Transaction not found", 404);
       if (!transaction.createdBy._id.equals(req.user._id)) throw new CustomError("Unauthorized to delete this transaction", 403);
+
+      // Check if this is the most recent transaction
+      const latestTransaction = await Transaction.findOne().sort({ createdAt: -1 }).session(session);
+      if (latestTransaction && latestTransaction._id.toString() !== id) {
+        throw new CustomError("Only the most recent transaction can be deleted", 403);
+      }
 
       const isBalanceAddition = transaction.items[0]?.itemName === "Balance Addition";
       const isBalanceRemoval = transaction.items[0]?.itemName === "Balance Removal";
