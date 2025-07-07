@@ -247,76 +247,102 @@ class UserController {
     }
 
     static async adjustUserBalance(req, res, next) {
+        // Start a new session for the transaction
         const session = await mongoose.startSession();
         session.startTransaction();
 
         try {
             const { id: targetUserId } = req.params;
-            const { amount } = req.body;
+            const { amount, reason } = req.body; // Added 'reason' as it's used in the response message
             const requestingUser = req.user;
-            console.log(amount)
+
+            // 1. Basic input validation
             if (!mongoose.isValidObjectId(targetUserId)) {
                 throw new CustomError("Invalid target user ID provided.", 400);
             }
+            if (amount === undefined || isNaN(Number(amount))) {
+                throw new CustomError("Please provide a valid numeric amount for adjustment.", 400);
+            }
 
+            const numericAmount = Number(amount);
+
+            // 2. Find target user within the session
             const targetUser = await User.findById(targetUserId).session(session);
+
+            // Ensure targetUser exists and has a balance property
             if (!targetUser) {
                 throw new CustomError("Target user not found.", 404);
             }
+            // Check if balance property exists, if not, initialize it to 0
+            if (typeof targetUser.balance === 'undefined' || targetUser.balance === null) {
+                targetUser.balance = 0;
+            }
 
-            const balanceBeforeAdjustment = targetUser.balance; // Store this value
+            const balanceBeforeAdjustment = targetUser.balance;
 
+            // 3. Update user balance
             const updatedUser = await User.findByIdAndUpdate(
                 targetUserId,
-                { $inc: { balance: Number(amount) } },
+                { $inc: { balance: numericAmount } },
                 { new: true, session }
             );
 
+            // If updatedUser somehow becomes null/undefined after findByIdAndUpdate
+            if (!updatedUser) {
+                throw new CustomError("Failed to update user balance. User not found after update attempt.", 500);
+            }
+
+            // 4. Update Central Balance
             let centralBalanceDoc = await CentralBalance.findOne().session(session);
             if (!centralBalanceDoc) {
-                centralBalanceDoc = await CentralBalance.create(
+                // If no central balance document exists, create one
+                // Ensure CentralBalance.create returns a single document or an array
+                const newCentralBalanceDocs = await CentralBalance.create(
                     [{ balance: 0, lastUpdated: Date.now() }],
                     { session }
-                )[0];
+                );
+                centralBalanceDoc = newCentralBalanceDocs[0]; // Assuming create returns an array
             }
-            centralBalanceDoc.balance += Number(amount);
+            centralBalanceDoc.balance += numericAmount;
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
-            // --- MOVED LOGIC FOR usersBalancesAtTransactionTime BEFORE Transaction.create ---
+            // 5. Capture all user balances at transaction time (within the session)
             const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
             const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
                 _id: userDoc._id,
                 name: userDoc.name,
                 balanceAtTime: userDoc.balance
             }));
-            // --- END MOVED LOGIC ---
 
-            const transactionType = Number(amount) > 0 ? "Balance Addition" : "Balance Removal";
+            // 6. Create Transaction record
+            const transactionType = numericAmount > 0 ? "Balance Addition" : "Balance Removal";
             const [transaction] = await Transaction.create(
                 [{
-                    items: [{ itemName: transactionType, price: Math.abs(Number(amount)) }],
+                    items: [{ itemName: transactionType, price: Math.abs(numericAmount) }],
                     createdBy: requestingUser._id,
                     sharedUsers: [targetUserId],
-                    totalPrice: Number(amount),
+                    totalPrice: numericAmount, // Keep original amount for total price
                     centralBalanceAfter: centralBalanceDoc.balance,
-                    individualDeduction: Number(amount),
+                    individualDeduction: numericAmount, // This seems to be the amount itself
                     userBalanceBeforeTransaction: balanceBeforeAdjustment,
-                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // This is now defined
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime
                 }],
                 { session }
             );
 
+            // Commit the transaction after all session-dependent operations are complete
             await session.commitTransaction();
 
+            // 7. Fetch the final transaction details (without the session, as it's committed)
+            // Use .populate after the transaction is committed if you need populated fields.
             const finalTransaction = await Transaction.findById(transaction._id)
-                .populate("createdBy sharedUsers")
-                .session(null);
+                .populate("createdBy sharedUsers"); // Removed .session(null) as it's default behavior outside a session
 
-            const action = Number(amount) > 0 ? "added to" : "deducted from";
+            const action = numericAmount > 0 ? "added to" : "deducted from";
             res.status(200).json({
                 status: "success",
-                message: `${Math.abs(Number(amount)).toFixed(2)} tk successfully ${action} ${updatedUser.name}'s balance. Reason: ${reason}.`,
+                message: `${Math.abs(numericAmount).toFixed(2)} tk successfully ${action} ${updatedUser.name}'s balance. Reason: ${reason || 'N/A'}.`,
                 data: {
                     user: {
                         id: updatedUser._id,
@@ -329,10 +355,12 @@ class UserController {
                 }
             });
         } catch (err) {
+            // Abort transaction in case of any error
             await session.abortTransaction();
             console.error("Error during user balance adjustment:", err);
             next(err.statusCode ? err : new CustomError(err.message || "Failed to adjust user balance due to an unexpected error.", 500));
         } finally {
+            // End the session regardless of success or failure
             session.endSession();
         }
     }
