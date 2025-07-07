@@ -254,7 +254,7 @@ class UserController {
             const { id: targetUserId } = req.params;
             const { amount } = req.body;
             const requestingUser = req.user;
-
+            console.log(amount)
             if (!mongoose.isValidObjectId(targetUserId)) {
                 throw new CustomError("Invalid target user ID provided.", 400);
             }
