@@ -19,8 +19,8 @@ console.log("Starting server after DB connection attempt...");
 // Middleware
 app.use(cookieParser());
 app.use(cors({
-    origin: process.env.CLIENT_URL || "https://bazar-hisab-bsm.vercel.app",
-    credentials: true,
+    origin: process.env.CLIENT_URL || "https://bazar-hisab-bsm.vercel.app", // Exact origin
+    credentials: true, // Allow cookies
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
     allowedHeaders: ["Content-Type", "Authorization"],
 }));

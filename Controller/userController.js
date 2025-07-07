@@ -499,15 +499,15 @@ class UserController {
 
             res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
-                sameSite: "Lax",
-                maxAge: 15 * 24 * 60 * 60 * 1000,
+                secure: process.env.NODE_ENV === "production", // true on Render, false locally if not HTTPS
+                sameSite: "none", // Required for cross-origin with credentials
+                maxAge: 15 * 24 * 60 * 60 * 1000, // 15 days
             });
 
             res.status(200).json({
                 status: "success",
                 data: {
-                    isAuthenticated: true, // Added for client compatibility
+                    isAuthenticated: true,
                     user: {
                         id: user._id,
                         name: user.name,
