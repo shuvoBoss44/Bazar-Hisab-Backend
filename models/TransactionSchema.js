@@ -11,7 +11,7 @@ const transactionSchema = new mongoose.Schema({
         price: {
             type: Number,
             required: [true, 'Item price is required'],
-            min: [0, 'Price cannot be negative']
+            min: [0, 'Price cannot be negative'] // Item prices are always positive
         }
     }],
     createdBy: {
@@ -22,16 +22,12 @@ const transactionSchema = new mongoose.Schema({
     sharedUsers: [{
         type: mongoose.Schema.ObjectId,
         ref: 'User',
-        validate: {
-            validator: function (v) {
-                return v.length > 0; // At least one shared user
-            },
-            message: 'At least one shared user is required'
-        }
+        required: [true, 'At least one shared user is required']
     }],
     totalPrice: {
         type: Number,
         required: [true, 'Total price is required'],
+        // totalPrice can be 0 (e.g., free items) or represent a positive amount for balance removal
     },
     centralBalanceAfter: {
         type: Number,
@@ -40,6 +36,7 @@ const transactionSchema = new mongoose.Schema({
     individualDeduction: {
         type: Number,
         required: [true, 'Individual deduction is required'],
+        // individualDeduction can be negative for Balance Removal
     },
     edited: {
         type: Boolean,
@@ -47,16 +44,16 @@ const transactionSchema = new mongoose.Schema({
     },
     userBalanceBeforeTransaction: {
         type: Number,
-        required: [true, 'Creator\'s balance before transaction is required'],
+        required: false, // This is specifically the creator's balance before the transaction.
     },
     createdAt: {
         type: Date,
-        default: Date.now,
-        index: true // Ensure index is explicitly set
+        default: Date.now
     },
+    // --- NEW FIELD ADDED ---
     usersBalancesAtTransactionTime: {
         type: [{
-            _id: {
+            _id: { // We'll store the User's ObjectId here for reference/uniqueness
                 type: mongoose.Schema.Types.ObjectId,
                 ref: 'User',
                 required: true
@@ -65,13 +62,13 @@ const transactionSchema = new mongoose.Schema({
                 type: String,
                 required: true
             },
-            balanceAtTime: {
+            balanceAtTime: { // This is the user's balance at the exact moment of the transaction
                 type: Number,
                 required: true
             }
         }],
-        required: [true, 'Historical user balances snapshot is required'],
-        default: []
+        required: [true, 'Historical user balances snapshot is required'], // Mark as required since it's crucial for history
+        default: [] // Default to an empty array
     }
 }, {
     toJSON: { virtuals: true },
@@ -84,10 +81,14 @@ transactionSchema.pre(/^find/, function (next) {
         path: 'createdBy sharedUsers',
         select: 'name email balance'
     });
+    // We don't populate 'usersBalancesAtTransactionTime' here
+    // because it stores a snapshot of the balance as a direct value,
+    // not a reference that needs further population.
     next();
 });
 
-// Optimized index
-transactionSchema.index({ createdAt: -1, createdBy: 1 }); // Compound index for sorting and filtering
+// Index for faster queries
+transactionSchema.index({ createdBy: 1, createdAt: -1 });
+transactionSchema.index({ sharedUsers: 1 }); // Consider if this is still optimal, as we now store all user balances directly in transaction
 
 module.exports = mongoose.model('Transaction', transactionSchema);
