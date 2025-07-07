@@ -52,7 +52,7 @@ const transactionSchema = new mongoose.Schema({
     createdAt: {
         type: Date,
         default: Date.now,
-        index: true
+        index: true // Ensure index is explicitly set
     },
     usersBalancesAtTransactionTime: {
         type: [{
@@ -88,6 +88,6 @@ transactionSchema.pre(/^find/, function (next) {
 });
 
 // Optimized index
-transactionSchema.index({ createdAt: -1, createdBy: 1 });
+transactionSchema.index({ createdAt: -1, createdBy: 1 }); // Compound index for sorting and filtering
 
 module.exports = mongoose.model('Transaction', transactionSchema);
