@@ -1,7 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const app = express();
-const database = require("./Db/index");
+const ConnectDB = require("./Db/index");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
 const userRoutes = require("./Routes/userRoutes");
@@ -9,7 +9,10 @@ const transactionRoutes = require("./Routes/transactionRoutes");
 const messageRoutes = require("./Routes/messageRoutes");
 
 // Connect to database
-database();
+(async () => {
+    await ConnectDB();
+    console.log('Starting server after DB connection...');
+})();
 
 // Middleware
 app.use(cookieParser());
