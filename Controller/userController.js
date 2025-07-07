@@ -500,19 +500,26 @@ class UserController {
 
     static async login(req, res, next) {
         try {
-            if (!process.env.JWT_SECRET) {
-                throw new CustomError("Server configuration error: JWT_SECRET not defined.", 500);
-            }
-
             const { email, password } = req.body;
-            if (!email?.trim() || !password) {
-                throw new CustomError("Email and password are required", 400);
-            }
-
             const normalizedEmail = email.toLowerCase().trim();
             const user = await User.findOne({ email: normalizedEmail }).select("+password");
-            if (!user || !(await bcrypt.compare(password, user.password))) {
+
+            if (!user) {
                 throw new CustomError("Invalid email or password", 401);
+            }
+
+            // Check if password is hashed
+            if (!user.password.startsWith('$2a$')) {
+                // Password is not hashed, compare directly (temporary fix)
+                if (password !== user.password) {
+                    throw new CustomError("Invalid email or password", 401);
+                }
+            } else {
+                // Password is hashed, use bcrypt
+                const isMatch = await bcrypt.compare(password, user.password);
+                if (!isMatch) {
+                    throw new CustomError("Invalid email or password", 401);
+                }
             }
 
             const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
@@ -521,9 +528,9 @@ class UserController {
 
             res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production", // true on Render, false locally if not HTTPS
-                sameSite: "none", // Required for cross-origin with credentials
-                maxAge: 15 * 24 * 60 * 60 * 1000, // 15 days
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "none",
+                maxAge: 15 * 24 * 60 * 60 * 1000,
             });
 
             res.status(200).json({
@@ -549,7 +556,7 @@ class UserController {
             res.clearCookie("token", {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
-                sameSite: "Lax"
+                sameSite: "none",
             });
             res.status(200).json({
                 status: "success",
