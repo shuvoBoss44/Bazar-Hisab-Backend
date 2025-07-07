@@ -196,6 +196,15 @@ class UserController {
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
+            // --- START NEW LOGIC FOR usersBalancesAtTransactionTime ---
+            const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
+            const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
+                _id: userDoc._id,
+                name: userDoc.name,
+                balanceAtTime: userDoc.balance
+            }));
+            // --- END NEW LOGIC ---
+
             const [transaction] = await Transaction.create(
                 [{
                     items: [{ itemName: "Balance Addition", price: Number(amount) }],
@@ -204,33 +213,29 @@ class UserController {
                     totalPrice: Number(amount),
                     centralBalanceAfter: centralBalanceDoc.balance,
                     individualDeduction: Number(amount),
-                    // NEW: Store the balance before the addition
-                    userBalanceBeforeTransaction: balanceBeforeAddition
+                    userBalanceBeforeTransaction: balanceBeforeAddition,
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // ADDED THIS LINE
                 }],
                 { session }
             );
 
             await session.commitTransaction();
 
-            // Populate to ensure createdBy and sharedUsers are full objects for the frontend
             const finalTransaction = await Transaction.findById(transaction._id)
                 .populate("createdBy sharedUsers")
                 .session(null);
 
             res.status(200).json({
                 status: "success",
-                // You can add a specific message here for the frontend if you want,
-                // but the frontend component also generates its own message.
-                // message: `${user.name} added ${Number(amount).toFixed(2)} tk to their balance.`,
                 data: {
                     user: {
                         id: updatedUser._id,
                         name: updatedUser.name,
                         email: updatedUser.email,
-                        balance: updatedUser.balance // This is the new balance
+                        balance: updatedUser.balance
                     },
                     centralBalance: centralBalanceDoc.balance,
-                    transaction: finalTransaction // Frontend needs this for details
+                    transaction: finalTransaction
                 }
             });
         } catch (err) {
@@ -247,7 +252,6 @@ class UserController {
 
         try {
             const { id: targetUserId } = req.params;
-            // The `amount` here can be positive (addition) or negative (removal)
             const { amount, reason = "Manual Balance Adjustment" } = req.body;
             const requestingUser = req.user;
 
@@ -282,20 +286,29 @@ class UserController {
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
-            const transactionType = Number(amount) > 0 ? "Balance Addition" : "Balance Removal"; // Changed from "Balance Adjustment (Addition/Removal)"
+            const transactionType = Number(amount) > 0 ? "Balance Addition" : "Balance Removal";
             const [transaction] = await Transaction.create(
                 [{
                     items: [{ itemName: transactionType, price: Math.abs(Number(amount)) }],
-                    createdBy: requestingUser._id, // User who initiated the adjustment
-                    sharedUsers: [targetUserId], // User whose balance was adjusted
-                    totalPrice: Number(amount), // Store the actual +/- amount for tracking
+                    createdBy: requestingUser._id,
+                    sharedUsers: [targetUserId],
+                    totalPrice: Number(amount),
                     centralBalanceAfter: centralBalanceDoc.balance,
-                    individualDeduction: Number(amount), // Store the actual +/- amount
-                    // NEW: Store the balance before the adjustment
-                    userBalanceBeforeTransaction: balanceBeforeAdjustment
+                    individualDeduction: Number(amount),
+                    userBalanceBeforeTransaction: balanceBeforeAdjustment,
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // ADDED THIS LINE
                 }],
                 { session }
             );
+
+            // --- START NEW LOGIC FOR usersBalancesAtTransactionTime ---
+            const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
+            const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
+                _id: userDoc._id,
+                name: userDoc.name,
+                balanceAtTime: userDoc.balance
+            }));
+            // --- END NEW LOGIC ---
 
             await session.commitTransaction();
 
@@ -369,6 +382,15 @@ class UserController {
             centralBalanceDoc.lastUpdated = Date.now();
             await centralBalanceDoc.save({ session });
 
+            // --- START NEW LOGIC FOR usersBalancesAtTransactionTime ---
+            const allUsersAfterTransaction = await User.find({}, 'name balance').session(session);
+            const usersBalancesAtTransactionTime = allUsersAfterTransaction.map(userDoc => ({
+                _id: userDoc._id,
+                name: userDoc.name,
+                balanceAtTime: userDoc.balance
+            }));
+            // --- END NEW LOGIC ---
+
             const [transaction] = await Transaction.create(
                 [{
                     items: [{ itemName: "Balance Removal", price: Number(amount) }],
@@ -377,8 +399,8 @@ class UserController {
                     totalPrice: -Number(amount), // Store as negative for removal in totalPrice
                     centralBalanceAfter: centralBalanceDoc.balance,
                     individualDeduction: -Number(amount), // Store as negative
-                    // NEW: Store the balance before the removal
-                    userBalanceBeforeTransaction: balanceBeforeRemoval
+                    userBalanceBeforeTransaction: balanceBeforeRemoval,
+                    usersBalancesAtTransactionTime: usersBalancesAtTransactionTime // ADDED THIS LINE
                 }],
                 { session }
             );
