@@ -193,7 +193,7 @@ class TransactionController {
       const originalTransaction = await Transaction.findById(transactionId).session(session);
       if (!originalTransaction) throw new CustomError("Transaction not found", 404);
 
-      if (originalTransaction.createdBy.toString() !== requestingUserId.toString()) {
+      if (originalTransaction.createdBy._id.toString() !== requestingUserId.toString()) {
         throw new CustomError("Unauthorized to update this transaction", 403);
       }
 
