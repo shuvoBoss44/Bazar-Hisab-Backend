@@ -197,13 +197,6 @@ class TransactionController {
         throw new CustomError("Unauthorized to update this transaction", 403);
       }
 
-      // Check if this is the most recent transaction
-      const latestTransaction = await Transaction.findOne().sort({ createdAt: -1 }).session(session);
-      if (latestTransaction && latestTransaction._id.toString() !== transactionId) {
-        throw new CustomError("Only the most recent transaction can be edited", 403);
-      }
-
-      // Validate transaction type consistency
       const wasOriginalBalanceAddition = originalTransaction.items[0]?.itemName === "Balance Addition";
       const wasOriginalBalanceRemoval = originalTransaction.items[0]?.itemName === "Balance Removal";
       const isNewBalanceAddition = items[0].itemName === "Balance Addition";
