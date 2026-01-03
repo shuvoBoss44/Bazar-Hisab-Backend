@@ -11,6 +11,7 @@ router.route("/")
 
 router.route("/:id")
     .get(TransactionController.getTransactionById)
+    .put(TransactionController.updateTransaction)
     .patch(TransactionController.updateTransaction)
     .delete(TransactionController.deleteTransaction);
 
