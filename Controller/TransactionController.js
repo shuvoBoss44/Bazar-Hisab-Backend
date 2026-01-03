@@ -10,7 +10,7 @@ class TransactionController {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const { items, sharedUserIds } = req.body;
+      const { items, sharedUserIds = [] } = req.body;
       const createdBy = req.user._id;
 
       if (!items?.length || !Array.isArray(items)) throw new CustomError("At least one item is required", 400);
@@ -28,7 +28,7 @@ class TransactionController {
       const createdByString = createdBy.toString();
 
       if (isBalanceTransaction) {
-        if (sharedUserIds.length > 1 || sharedUserIds[0]?.toString() !== createdByString) {
+        if (sharedUserIds.length > 0 && sharedUserIds[0]?.toString() !== createdByString) {
           throw new CustomError("Balance transactions can only involve the creator as the shared user.", 400);
         }
         finalSharedUsers = [createdBy];
@@ -109,7 +109,7 @@ class TransactionController {
 
       await Message.create([{
         transactionId: transaction._id,
-        message: `${purchaser.name} ${isBalanceAddition ? "added" : (isBalanceRemoval ? "removed" : "bought")} [${items.map(i => `${i.itemName}: $${i.price.toFixed(2)}`).join(", ")}]`,
+        message: `${purchaser.name} ${isBalanceAddition ? "added" : (isBalanceRemoval ? "removed" : "bought")} [${items.map(i => `${i.itemName}: ৳${i.price.toFixed(2)}`).join(", ")}]`,
         items,
         totalPrice: total,
         purchaser: createdBy,
@@ -295,7 +295,7 @@ class TransactionController {
       await Message.findOneAndUpdate(
         { transactionId: transactionId },
         {
-          message: `${purchaser.name} ${isNewBalanceAddition ? "added" : (isNewBalanceRemoval ? "removed" : "bought")} [${items.map(i => `${i.itemName}: $${i.price.toFixed(2)}`).join(", ")}]`,
+          message: `${purchaser.name} ${isNewBalanceAddition ? "added" : (isNewBalanceRemoval ? "removed" : "bought")} [${items.map(i => `${i.itemName}: ৳${i.price.toFixed(2)}`).join(", ")}]`,
           items,
           totalPrice,
           purchaser: requestingUserId,

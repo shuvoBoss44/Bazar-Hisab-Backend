@@ -342,7 +342,7 @@ class UserController {
             const action = numericAmount > 0 ? "added to" : "deducted from";
             res.status(200).json({
                 status: "success",
-                message: `${Math.abs(numericAmount).toFixed(2)} tk successfully ${action} ${updatedUser.name}'s balance. Reason: ${reason || 'N/A'}.`,
+                message: `${Math.abs(numericAmount).toFixed(2)} ৳ successfully ${action} ${updatedUser.name}'s balance. Reason: ${reason || 'N/A'}.`,
                 data: {
                     user: {
                         id: updatedUser._id,
@@ -383,7 +383,7 @@ class UserController {
             }
 
             if (targetUser.balance < Number(amount)) {
-                throw new CustomError(`Insufficient balance for user ${targetUser.name} to remove ${Number(amount).toFixed(2)} tk. Current balance: ${targetUser.balance.toFixed(2)} tk.`, 400);
+                throw new CustomError(`Insufficient balance for user ${targetUser.name} to remove ${Number(amount).toFixed(2)} ৳. Current balance: ${targetUser.balance.toFixed(2)} ৳.`, 400);
             }
 
             const balanceBeforeRemoval = targetUser.balance; // Store this value
@@ -434,7 +434,7 @@ class UserController {
 
             res.status(200).json({
                 status: "success",
-                message: `${Number(amount).toFixed(2)} tk successfully removed from ${updatedUser.name}'s balance.`,
+                message: `${Number(amount).toFixed(2)} ৳ successfully removed from ${updatedUser.name}'s balance.`,
                 data: {
                     user: {
                         id: updatedUser._id,
