@@ -609,7 +609,7 @@ class UserController {
             }
 
             const decoded = jwt.verify(req.cookies.token, process.env.JWT_SECRET);
-            const user = await User.findById(decoded.id).select("name email balance role");
+            const user = await User.findById(decoded.id).select("name email balance role createdAt");
 
             res.status(200).json({
                 status: "success",

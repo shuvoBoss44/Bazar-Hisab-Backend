@@ -16,7 +16,7 @@ const authMiddleware = async (req, res, next) => {
 
         const decoded = await promisify(jwt.verify)(token, process.env.JWT_SECRET);
 
-        const user = await User.findById(decoded.id).select("name email balance");
+        const user = await User.findById(decoded.id).select("name email balance createdAt");
         if (!user) {
             throw new CustomError("User not found", 401);
         }
