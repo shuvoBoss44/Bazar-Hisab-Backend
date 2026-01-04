@@ -150,7 +150,8 @@ class UserController {
                         name: user.name,
                         email: user.email,
                         balance: user.balance,
-                        role: user.role
+                        role: user.role,
+                        createdAt: user.createdAt,
                     }
                 }
             });
@@ -555,6 +556,7 @@ class UserController {
                         email: user.email,
                         balance: user.balance,
                         role: user.role,
+                        createdAt: user.createdAt,
                     },
                 },
             });
@@ -593,6 +595,7 @@ class UserController {
                             email: req.user.email,
                             balance: req.user.balance,
                             role: req.user.role,
+                            createdAt: req.user.createdAt,
                         },
                     },
                 });
@@ -619,6 +622,7 @@ class UserController {
                             email: user.email,
                             balance: user.balance,
                             role: user.role,
+                            createdAt: user.createdAt,
                         }
                         : null,
                 },
